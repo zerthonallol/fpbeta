@@ -8,12 +8,14 @@ import { buildBear, buildGhost, buildLocker, buildTable, buildArcade, buildGener
 import { L } from "./i18n";
 import { availableStoryChoice, canReleaseBear } from "./story-rules";
 import { CHOICES } from "./story";
+import { DIFFICULTY, pickSpread, pickWander, type Difficulty, type DifficultyPreset } from "./difficulty";
+import { buildCircus, tentWallTexture } from "./circus";
 
 // Legend: # brick wall, M mirror, . floor, D operator door, H locker, T table (hide),
 // A arcade, 1/2/3 generators, f fuse, c cog, P start, X exit gate
 const MAP = [
   "########################",
-  "#.....#.c..#...........#",
+  "#.....#....#...........#",
   "#.1...#.T..D.....2.....#",
   "#.....#....#...........#",
   "###.#########.#######.##",
@@ -21,7 +23,7 @@ const MAP = [
   "#.MMMMMMM....A....###..#",
   "#.M.....M........#.H#..#",
   "#.M.MMM.M........#..#..#",
-  "#.M.M.f.M....H...##.#..#",
+  "#.M.M...M....H...##.#..#",
   "#.M.M.MMM...........#.##",
   "#.M.M...M.......#####..#",
   "#...MMM.M.......#.3....#",
@@ -143,6 +145,8 @@ export class Game {
     phase: 0,
     screechT: 8,
     knowsHide: false,
+    idleT: 0,
+    wanderT: 15,
   };
   private waypoints: [number, number][] = [];
 
@@ -165,8 +169,12 @@ export class Game {
   private decoys: THREE.Group[] = [];
 
   private P: GfxPreset;
+  private D: DifficultyPreset;
+  private circus!: ReturnType<typeof buildCircus>;
+  private floorCells: [number, number][] = [];
   private releaseArmed = false;
-  constructor(container: HTMLElement, cb: GameCallbacks, gfx: Graphics = "medium", private skin: SkinId = "classic") {
+  constructor(container: HTMLElement, cb: GameCallbacks, gfx: Graphics = "medium", private skin: SkinId = "classic", difficulty: Difficulty = "normal") {
+    this.D = DIFFICULTY[difficulty];
     this.P = GFX[gfx];
     this.container = container;
     this.cb = cb;
@@ -190,7 +198,7 @@ export class Game {
     this.sfx.startMusic();
     this.sfx.startRain();
     this.startT = performance.now();
-    this.flashMessage(L("Почините 3 электрощитка, чтобы открыть ворота. Берегитесь Зазывалы. Призрак сторожа рядом — поговорите с ним.", "Repair 3 fuse boxes to open the gate. Beware of the Barker. The watchman's ghost is nearby — talk to him."), 6);
+    this.flashMessage(L("Почините 3 электрощитка, чтобы открыть ворота. Берегитесь Аниматроника. Призрак сторожа рядом — поговорите с ним.", "Repair 3 fuse boxes to open the gate. Beware of the Animatronic. The watchman's ghost is nearby — talk to him."), 6);
     this.loop();
   }
 
@@ -282,8 +290,10 @@ export class Game {
     sc.add(floor);
 
     // walls (instanced per material)
-    const brick = new THREE.MeshStandardMaterial({ map: brickTexture(), roughness: 0.95 });
-    const stripe = new THREE.MeshStandardMaterial({ map: stripeTexture(), roughness: 0.9 });
+    const brick = new THREE.MeshStandardMaterial({ map: tentWallTexture(), roughness: 0.9 });
+    const stripe = new THREE.MeshStandardMaterial({ map: tentWallTexture("#1f4d9a", "#f0c84a"), roughness: 0.9 });
+    const lintelMat = new THREE.MeshStandardMaterial({ map: brickTexture(), roughness: 0.95 });
+    void stripeTexture;
     this.cubeCam = new THREE.CubeCamera(0.1, 60, new THREE.WebGLCubeRenderTarget(this.P.cube));
     this.cubeCam.position.set(cx(5), 1.7, cx(10));
     sc.add(this.cubeCam);
@@ -325,7 +335,7 @@ export class Game {
     this.doorMesh.position.set(cx(dc), 1.5, cx(dr));
     this.doorMesh.castShadow = true;
     sc.add(this.doorMesh);
-    const lintel = new THREE.Mesh(new THREE.BoxGeometry(S, WALL_H - 3, S), brick);
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(S, WALL_H - 3, S), lintelMat);
     lintel.position.set(cx(dc), 3 + (WALL_H - 3) / 2, cx(dr));
     sc.add(lintel);
     this.interactables.push({
@@ -449,6 +459,8 @@ export class Game {
     addSign("FUN HOUSE", "#ff3b6b", cx(18), 5 * S + 0.02 - S, 0);
     addSign("EXIT", "#ff2a1a", 11 * S, 16 * S - 0.02, Math.PI, 3);
     addSign("GAMES", "#7dff6a", cx(13), 6 * S - 1.0 + 0.6, 0, 3);
+    addSign("CIRCUS", "#ffb347", cx(12), 4 * S + S + 0.02, 0, 6);
+    this.circus = buildCircus(sc, { width: COLS * S, depth: ROWS * S, wallH: WALL_H, ring: new THREE.Vector3(cx(12), 0, cx(10)), plazaR: 4.6 });
 
     // garlands
     const bulbPos: THREE.Vector3[] = [];
@@ -556,8 +568,6 @@ export class Game {
     // monster
     this.bear = buildBear(this.skin);
     sc.add(this.bear.root);
-    this.m.pos.set(cx(20), 0, cx(2));
-    this.bear.root.position.copy(this.m.pos);
     const ghost = buildGhost();
     ghost.root.position.set(cx(10), 0, cx(15));
     sc.add(ghost.root);
@@ -566,8 +576,13 @@ export class Game {
       label: () => L("Поговорить со сторожем Митчем", "Talk to Mitch, the watchman"),
       use: () => { this.openModal(); this.cb.onGhost(); },
     });
-    this.waypoints = ([[3, 2], [3, 5], [12, 5], [22, 5], [22, 9], [19, 10], [21, 12], [18, 15], [12, 15], [2, 15], [1, 9], [1, 5], [12, 10], [15, 2], [20, 2], [10, 12]] as [number, number][]).filter(([c, r]) => !this.solid(c, r, true));
-    this.m.target.copy(this.cellCenter(...this.waypoints[3]));
+    // every walkable cell is a possible wander target; spawn far from the player
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (!this.solid(c, r, true)) this.waypoints.push([c, r]);
+    const pc0 = this.cell(this.pos.x, this.pos.z);
+    const spawnCell = pickWander(this.waypoints, pc0, 14);
+    this.m.pos.copy(this.cellCenter(...spawnCell));
+    this.bear.root.position.copy(this.m.pos);
+    this.m.target.copy(this.cellCenter(...pickWander(this.waypoints, spawnCell, 8)));
 
     // mirror maze decoy reflections
     for (const [c, r] of [[3, 9], [7, 7], [3, 12]]) {
@@ -611,9 +626,14 @@ export class Game {
         q.push([nc, nr]);
       }
     }
-    const spots = cells.filter(([c, r]) => Math.abs(c - start[0]) + Math.abs(r - start[1]) > 3 && MAP[r][c] === ".").sort(() => Math.random() - 0.5);
-    const next = () => spots.pop()!;
-
+    const free = cells.filter(([c, r]) => Math.abs(c - start[0]) + Math.abs(r - start[1]) > 3 && MAP[r][c] === ".");
+    const nItems = 1 + 1 + 3 + this.D.batteries + 3; // fuse, key, tokens, batteries, notes
+    const spots = pickSpread(free, nItems, 6, [start]).reverse();
+    const next = () => spots.pop() ?? free[Math.floor(Math.random() * free.length)];
+    // the cog lives somewhere inside the locked operator room
+    const room: [number, number][] = [];
+    for (let r = 1; r <= 3; r++) for (let c = 7; c <= 10; c++) if (MAP[r][c] === ".") room.push([c, r]);
+    const cogCell = room[Math.floor(Math.random() * room.length)];
     this.tokenOrder = (["red", "blue", "yellow"] as TokenColor[]).sort(() => Math.random() - 0.5);
     const spawn = (kind: ItemKind, c: number, r: number, label: string, onPick: () => boolean, color?: string) => {
       const mesh = buildItem(kind, color);
@@ -643,10 +663,9 @@ export class Game {
       this.flashMessage(L(`Подобрано: ${INV_LABEL[id]}`, `Picked up: ${INV_LABEL[id]}`));
       return true;
     };
-    const f = MAP.findIndex((row) => row.includes("f"));
-    spawn("fuse", MAP[f].indexOf("f"), f, L("Подобрать предохранитель", "Pick up fuse"), inv("fuse"));
-    const cRow = MAP.findIndex((row) => row.includes("c"));
-    spawn("cog", MAP[cRow].indexOf("c"), cRow, L("Подобрать шестерню", "Pick up cog"), inv("cog"));
+    const fc = next();
+    spawn("fuse", fc[0], fc[1], L("Подобрать предохранитель", "Pick up fuse"), inv("fuse"));
+    spawn("cog", cogCell[0], cogCell[1], L("Подобрать шестерню", "Pick up cog"), inv("cog"));
     const k = next();
     spawn("key", k[0], k[1], L("Подобрать ключ от операторской", "Pick up operator room key"), inv("key"));
     for (const col of this.tokenOrder) {
@@ -661,7 +680,7 @@ export class Game {
         return true;
       }, TOKEN_HEX[col]);
     }
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < this.D.batteries; i++) {
       const s = next();
       spawn("battery", s[0], s[1], L("Подобрать батарейку", "Pick up battery"), () => {
         if (this.battery > 95) {
@@ -675,7 +694,7 @@ export class Game {
     }
     const notes: [ItemKind, Note][] = [
       ["note", { title: L("Записка техника", "Technician's note"), text: L(`Этот чёртов «Token Trial» опять глючит. Жетоны принимает только строго по порядку:\n\n${this.tokenOrder.map((c) => TOKEN_RU[c]).join(" → ")}\n\nЕсли перепутать — орёт сиреной на весь парк. В лотке выдачи лежит механический ключ от щитка №3.`, `That damn Token Trial is acting up again. Insert tokens in this exact order:\n\n${this.tokenOrder.map((c) => TOKEN_RU[c]).join(" → ")}\n\nGet it wrong and the siren wakes the whole park. The prize tray holds the wind-up key for fuse box #3.`) }],
-      ["note", { title: L("Приказ о закрытии, 1987", "Closure order, 1987"), text: L("Парк «Весёлые Горки» закрывается немедленно после инцидента с ростовым аниматроником «Зазывала Барни». Демонтаж робота отложен: при отключении питания он продолжает двигаться. Всем сотрудникам — не входить на территорию после заката.", "Happy Hills is closed immediately following the incident involving Barney the Barker. Dismantling is postponed: the robot continues moving without power. All employees: do not enter after sunset.") }],
+      ["note", { title: L("Приказ о закрытии, 1987", "Closure order, 1987"), text: L("Парк «Весёлые Горки» закрывается немедленно после инцидента с ростовым аниматроником «Аниматроник Барни». Демонтаж робота отложен: при отключении питания он продолжает двигаться. Всем сотрудникам — не входить на территорию после заката.", "Happy Hills is closed immediately following the incident involving Barney the Animatronic. Dismantling is postponed: the robot continues moving without power. All employees: do not enter after sunset.") }],
       ["tape", { title: L("Кассета: «Смена 14»", "Tape: Shift 14"), tape: true, text: L("…*шипение*… Он реагирует на свет. Если светишь прямо в глаз — идёт к тебе. И на шум тоже: когда запускаешь щиток, он слышит гул через весь парк. …Прячься в шкафчиках или под столом в операторской, пока не пройдёт мимо. Только не дай ему увидеть, куда ты залез… *щелчок*", "…*static*… He follows light. Shine in his eye and he comes for you. Noise too: a running fuse box can be heard across the park. Hide in lockers or under the operator room table until he passes. Don't let him see you hide… *click*") }],
     ];
     this.notesTotal = notes.length;
@@ -917,7 +936,7 @@ export class Game {
 
     // flashlight
     if (this.flashOn) {
-      this.battery = Math.max(0, this.battery - dt * 0.75);
+      this.battery = Math.max(0, this.battery - dt * 0.75 * this.D.drain);
       if (this.battery <= 0) {
         this.flashOn = false;
         this.flashMessage(L("Фонарик погас. Ищите батарейки.", "The flashlight died. Find batteries."));
@@ -959,9 +978,9 @@ export class Game {
     const pz = this.hidden ? this.hidden.at.z : this.pos.z;
     const dx = px - m.pos.x, dz = pz - m.pos.z;
     const dist = Math.hypot(dx, dz);
-    const losOk = dist < 30 && this.los(m.pos.x, m.pos.z, px, pz);
+    const losOk = dist < 30 * this.D.sight && this.los(m.pos.x, m.pos.z, px, pz);
     const facing = Math.sin(m.dir) * dx / (dist || 1) + Math.cos(m.dir) * dz / (dist || 1);
-    let sees = !this.hidden && losOk && ((dist < 16 && facing > 0.3) || dist < 4);
+    let sees = !this.hidden && losOk && ((dist < 16 * this.D.sight && facing > 0.3) || dist < 4);
     // flashlight beam in its face
     if (!this.hidden && this.flash.intensity > 5 && losOk && dist < 22) {
       const fwd = new THREE.Vector3();
@@ -990,6 +1009,16 @@ export class Game {
     if (m.mode === "chase") speed = 3.9;
     else if (m.mode === "investigate") speed = 2.4;
     else if (m.mode === "search") speed = 1.2;
+    speed *= this.D.speed;
+    // wandering: occasionally pick a new random spot even before arriving
+    if (m.mode === "patrol") {
+      m.wanderT -= dt;
+      if (m.wanderT <= 0) {
+        m.wanderT = rand(12, 22);
+        m.target.copy(this.cellCenter(...pickWander(this.waypoints, this.cell(m.pos.x, m.pos.z), 7)));
+        m.path = [];
+      }
+    }
 
     // choose goal
     const goal = m.target;
@@ -1024,14 +1053,19 @@ export class Game {
           if (Math.abs(c - mc[0]) + Math.abs(r - mc[1]) < 6) m.target.copy(this.cellCenter(c, r));
         }
       }
-      if (m.mode === "patrol") {
-        const [c, r] = this.waypoints[Math.floor(Math.random() * this.waypoints.length)];
-        m.target.copy(this.cellCenter(c, r));
+      if (m.mode === "patrol" && m.idleT <= 0) {
+        // pause and look around sometimes, then wander somewhere random
+        if (Math.random() < 0.5) m.idleT = rand(1, 3.5);
+        m.target.copy(this.cellCenter(...pickWander(this.waypoints, mc, 7)));
+        m.wanderT = rand(12, 22);
         m.path = [];
       }
     }
     let moved = 0;
-    if (sd > 0.05) {
+    if (m.mode === "patrol" && m.idleT > 0) {
+      m.idleT -= dt;
+      m.dir += Math.sin(this.clock.elapsedTime * 1.7) * dt * 1.2;
+    } else if (sd > 0.05) {
       steer.multiplyScalar(1 / sd);
       const step = Math.min(sd, speed * dt);
       const nx = m.pos.x + steer.x * step, nz = m.pos.z + steer.z * step;
@@ -1128,6 +1162,7 @@ export class Game {
       (f.material as THREE.MeshBasicMaterial).opacity = 0.35 + Math.sin(t * 0.3 + i) * 0.12;
     });
     this.wheel.rotation.z = Math.sin(t * 0.05) * 0.08;
+    this.circus.update(t, dt);
 
     // sparks
     this.sparkT -= dt;
