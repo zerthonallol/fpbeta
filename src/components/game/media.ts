@@ -1,0 +1,11 @@
+import run from "@/assets/ui/icon-run.png";
+import hand from "@/assets/ui/icon-hand.png";
+import flashlight from "@/assets/ui/icon-flashlight.png";
+import bag from "@/assets/ui/icon-bag.png";
+import fuse from "@/assets/items/fuse.png";
+import cog from "@/assets/items/cog.png";
+import key from "@/assets/items/key.png";
+import tokens from "@/assets/items/tokens.png";
+import mechkey from "@/assets/items/mechkey.png";
+export const CONTROL_IMAGES = { run, hand, flashlight, bag };
+export const ITEM_IMAGES = { fuse, cog, key, tokens, mechkey };

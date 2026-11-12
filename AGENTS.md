@@ -28,3 +28,7 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+- Keep browser-only Three.js scenes dynamically imported by the client-only game route; this prevents SSR evaluation of canvas APIs.
+- Use shared story eligibility helpers for dialogue and ending gates; UI and game state must enforce the same conditions.
+- Ship pre-generated voice audio as static game assets; gameplay must not require credentials or live inference.
