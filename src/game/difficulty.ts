@@ -42,5 +42,5 @@ export function pickSpread(cells: Cell[], n: number, minDist: number, avoid: Cel
 export function pickWander(cells: Cell[], from: Cell, minDist: number, rng = Math.random): Cell {
   const far = cells.filter((c) => manhattan(c, from) >= minDist);
   const list = far.length ? far : cells;
-  return list[Math.floor(rng() * list.length)];
+  return list[Math.floor(rng() * list.length)] ?? from;
 }
