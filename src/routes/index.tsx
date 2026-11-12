@@ -12,6 +12,7 @@ import { loadLang, setLang as saveLang, L } from "@/game/i18n";
 import type { Lang } from "@/game/story";
 import { SKINS, type SkinId } from "@/game/models";
 import { TouchControls } from "@/components/game/TouchControls";
+import { DIFFICULTY, type Difficulty } from "@/game/difficulty";
 
 export const Route = createFileRoute("/")({
   ssr: false,
@@ -33,7 +34,7 @@ const ENDINGS_RU: Record<Exclude<Ending, "release" | "keeper">, { title: string;
     title: "ВАС ПОЙМАЛИ",
     tag: "Концовка 1 из 6 · Новый костюм",
     tone: "text-primary",
-    text: "Зазывала Барни нежно поправил на вас соломенную шляпу. Утром охранник заметит у карусели второго аниматроника — новенького, с очень живыми глазами.",
+    text: "Аниматроник Барни нежно поправил на вас соломенную шляпу. Утром охранник заметит у карусели второго аниматроника — новенького, с очень живыми глазами.",
   },
   dark: {
     title: "ТЬМА",
@@ -79,7 +80,7 @@ function Page() {
   const menuBox = useRef<HTMLDivElement>(null);
   const game = useRef<Game | null>(null);
   const menu = useRef<MenuScene | null>(null);
-  const [screen, setScreen] = useState<"menu" | "intro" | "play" | "end">("menu");
+  const [screen, setScreen] = useState<"menu" | "intro" | "difficulty" | "play" | "end">("menu");
   const [panel, setPanel] = useState<"main" | "controls" | "endings" | "graphics" | "skins">("main");
   const [gfx, setGfx] = useState<Graphics>("medium");
   const [isTouch, setIsTouch] = useState(false);
@@ -103,7 +104,7 @@ function Page() {
   }, []);
 
   useEffect(() => {
-    if (screen === "play" || screen === "intro" || !menuBox.current) return;
+    if (screen === "play" || screen === "intro" || screen === "difficulty" || !menuBox.current) return;
     let alive = true;
     import("@/game/MenuScene").then(({ MenuScene }) => {
       if (alive && menuBox.current) { menu.current = new MenuScene(menuBox.current); menu.current.setSkin(skin); }
@@ -121,7 +122,8 @@ function Page() {
     }
     setNote(null); setInventory(false); setGhost(false); setArcade({ open: false, left: [], msg: "" }); setScreen("intro");
   };
-  const start = async () => {
+  const [difficulty, setDifficulty] = useState<Difficulty>("normal");
+  const start = async (diff: Difficulty = difficulty) => {
     if (starting || !box.current) return;
     setStarting(true);
     const { Game } = await import("@/game/Game");
@@ -145,7 +147,7 @@ function Page() {
         });
         setTimeout(() => { game.current?.dispose(); game.current = null; setScreen("end"); }, 50);
       },
-    }, gfx, skin);
+    }, gfx, skin, diff);
     setStarting(false);
     game.current.lock();
   };
@@ -186,7 +188,22 @@ function Page() {
         <TouchControls game={game} prompt={hud.prompt} flashlight={hud.flashlight} onInventory={openInventory} />
       )}
 
-      {screen === "intro" && <Intro lang={lang} onFinish={start} />}
+      {screen === "intro" && <Intro lang={lang} onFinish={() => setScreen("difficulty")} />}
+      {screen === "difficulty" && (
+        <div className="absolute inset-0 z-40 grid place-items-center bg-background p-6">
+          <div className="fade-up w-full max-w-lg text-center">
+            <h2 className="title-3d text-4xl md:text-5xl">{L("Выберите сложность", "Choose difficulty")}</h2>
+            <div className="mt-8 grid gap-3">
+              {(Object.keys(DIFFICULTY) as Difficulty[]).map((d) => (
+                <Button key={d} variant="outline" disabled={starting} className="panel-glass h-auto flex-col items-start gap-1 rounded px-5 py-4 text-left" onClick={() => { setDifficulty(d); start(d); }}>
+                  <span className="font-display text-xl">{lang === "ru" ? DIFFICULTY[d].ru : DIFFICULTY[d].en}</span>
+                  <span className="whitespace-normal text-sm text-muted-foreground">{lang === "ru" ? DIFFICULTY[d].ruHint : DIFFICULTY[d].enHint}</span>
+                </Button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {screen === "play" && !isTouch && !inventory && !ghost && <Button variant="outline" size="icon" className="absolute right-5 top-5" title={L("Инвентарь", "Inventory")} aria-label={L("Инвентарь", "Inventory")} onClick={openInventory}><Backpack /></Button>}
       {inventory && hud && <div className="absolute inset-0 grid place-items-center bg-background/80 p-4"><section className="game-dialog panel-glass w-full max-w-xl rounded p-5">
         <div className="flex justify-between items-center mb-4"><h2 className="font-display text-2xl">{L("Инвентарь", "Inventory")} · {hud.slots.length}/4</h2><Button variant="ghost" size="icon" aria-label={L("Закрыть", "Close")} onClick={closeInventory}><X /></Button></div>
@@ -266,7 +283,7 @@ function Page() {
                         <p>{L("Мышь — осмотреться, E / клик — действие", "Mouse — look, E / click — interact")}</p>
                         <p>{L("F — фонарик, Tab — инвентарь", "F — flashlight, Tab — inventory")}</p>
                       </>)}
-                      <p className="pt-2 text-muted-foreground">{L("Почините 3 щитка и выберитесь через ворота. Свет и шум привлекают Зазывалу.", "Repair 3 fuse boxes and escape through the gate. Light and noise attract Barney.")}</p>
+                      <p className="pt-2 text-muted-foreground">{L("Почините 3 щитка и выберитесь через ворота. Свет и шум привлекают Аниматроника.", "Repair 3 fuse boxes and escape through the gate. Light and noise attract Barney.")}</p>
                       <MenuItem onClick={() => setPanel("main")}>{L("Назад", "Back")}</MenuItem>
                     </div>
                   )}
